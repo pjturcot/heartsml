@@ -1,8 +1,10 @@
 # coding: utf8
 
 import random
+import copy
 import logging
 import numpy as np
+from UCT import UCT
 
 
 class Card(object):
@@ -54,7 +56,10 @@ class Deck(list):
         pass
 
     def __repr__(self):
-        return "Deck ({n_cards} cards)".format(n_cards=len(self))
+        return self.tostring()
+
+    def copy(self):
+        return copy.deepcopy(self)
 
     def initialize(self):
         for suit in Card.SUIT_NAME.keys():
@@ -95,8 +100,13 @@ class Player(Deck):
         self.points = 0  # Number of points accumulated by the player
 
     def __repr__(self):
-        return "Player {id} ({n_cards} cards)".format(id=self.id, n_cards=len(self))
+        return "Player {id}: {cards}".format( id=self.id, cards=self.tostring(sort=True))
 
+    def copy(self):
+        p = copy.deepcopy(self)
+        p.id = self.id
+        p.points = self.points
+        return p
 
 class Trick(Deck):
 
@@ -117,6 +127,13 @@ class Trick(Deck):
 
     def __repr__(self):
         return "Trick: " + self.tostring(sort=False)
+
+    def copy(self):
+        t = copy.deepcopy(self)
+        t.hearts_broken = self.hearts_broken
+        t.first_trick = self.first_trick
+        t.lead_suit = self.lead_suit
+        return t
 
     def append(self, card):
         if len(self) == 0:
@@ -169,7 +186,7 @@ class Trick(Deck):
     def winner(self):
         if len(self) != 4:
             raise RuntimeError("Cannot determine a winner until 4 cards are played.")
-        return np.argmax([ card.value if card.suit == self.lead_suit else -1 for card in self ])
+        return np.argmax([ card.value if card.value != 1 else 14 if card.suit == self.lead_suit else -1 for card in self ])
 
 class Hearts():
     def __init__(self):
@@ -259,3 +276,120 @@ class Hearts():
         for point, player in zip( points, self.players ):
             player.points += point
 
+class HeartsState():
+    def __init__(self):
+        self.reset()
+
+    @staticmethod
+    def is_point_card(card):
+        return card.suit == Card.HEARTS or (card.suit == Card.SPADES and card.value == 12)
+
+    @staticmethod
+    def count_points(deck):
+        points = 0
+        for card in deck:
+            if Hearts.is_point_card( card ):
+                points += 1
+                if card.suit == Card.SPADES:
+                    points += 12
+        return points
+
+    def _deal_cards(self):
+        """Deal a round of cards to all the players."""
+        for p in self.players:
+            assert len(p) == 0
+        d = Deck()
+        d.initialize()
+        d.shuffle()
+        for i_round in range(13):
+            for ip, p in enumerate(self.players):
+                p.append(d.pop())
+        assert len(d) == 0
+
+    def _player_index(self, card):
+        """Find which player is holding a specific card."""
+        for ip, p in enumerate(self.players):
+            if card in p:
+                return ip
+
+    def reset(self):
+        self.players = [Player(id) for id in range(4)]
+        self.played_cards = [ Deck() for x in self.players ]
+        self._deal_cards()
+        self.round = 0
+        self.turn = -1
+        self.hearts_broken = False
+        self.trick = Trick( self.hearts_broken, self.round == 0 )
+
+        self.leading_player = (self._player_index( Card(2, Card.CLUBS))) % 4
+        self.playerJustMoved = self.leading_player
+
+    def Clone(self):
+        """Create a deep copy of the HeartsState"""
+        st = HeartsState()
+        st.players = [ p.copy() for p in self.players ]
+        st.played_cards = [ d.copy() for d in self.played_cards ]
+        st.round = self.round
+        st.turn = self.turn
+        st.hearts_broken = self.hearts_broken
+        st.trick = self.trick.copy()
+        st.leading_player = self.leading_player
+        st.playerJustMoved = self.playerJustMoved
+        return st
+
+    def DoMove(self, card ):
+        self.turn += 1
+        self.playerJustMoved = ( self.leading_player + self.turn ) % 4
+        possible_plays = self.trick.valid_plays(self.players[ self.playerJustMoved ])
+        logging.debug( "[Round {round}] {trick: <18}. P{player} possible plays: {plays: <50} .... Chose: {card}".format(
+            trick=self.trick, player=self.playerJustMoved, plays=possible_plays, card=card, round=self.round))
+        self.players[ self.playerJustMoved ].remove( card )
+        self.trick.append( card )
+
+        if len(self.trick) == 4:
+            self.hearts_broken = self.trick.hearts_broken
+            winning_player = ( self.trick.winner() + self.leading_player ) % 4
+            logging.info( "[Round {round}] {trick: <18}  WINNER: {winner} (P{player})".format(
+                round=self.round, trick=self.trick, player=winning_player, winner=self.trick[self.trick.winner()]))
+            self.leading_player = winning_player
+            for c in self.trick:
+                self.played_cards[ winning_player ].append( c )
+            self.round += 1
+            self.turn = -1
+            self.trick = Trick(self.hearts_broken, self.round == 0)
+
+    def GetMoves(self):
+        next_player = ( self.leading_player + self.turn + 1) % 4
+        possible_plays = self.trick.valid_plays(self.players[ next_player ])
+        return possible_plays
+
+    def GetResult(self, player_index ):
+        points = np.array(map( Hearts.count_points, self.played_cards ))
+        if any(points == 26):
+            points = -points + 26
+        win_value = points == points.min()
+        win_value = win_value.astype('float') / win_value.sum()
+        return win_value[player_index]
+
+    def __repr__(self):
+        next_player = ( self.leading_player + self.turn + 1) % 4
+        return "[Round {round}].\n{trick}\n{player}".format(
+            round=self.round, trick=self.trick, player=self.players[next_player] )
+
+def UCTPlayHearts():
+    state = HeartsState()
+    while (state.GetMoves() != []):
+        print str(state)
+        if (state.leading_player + state.turn)%4 == 0:
+            m = UCT(rootstate = state, itermax = 1000, verbose = False) # play with values for itermax and verbose = True
+        else:
+            m = UCT(rootstate = state, itermax = 100, verbose = False)
+        print "Best Move: " + str(m) + "\n"
+        logging.root.setLevel(logging.INFO)
+        state.DoMove(m)
+        logging.root.setLevel(logging.WARNING)
+    if state.GetResult(state.playerJustMoved) == 1.0:
+        print "Player " + str(state.playerJustMoved) + " wins!"
+    elif state.GetResult(state.playerJustMoved) == 0.0:
+        print "Player " + str(3 - state.playerJustMoved) + " wins!"
+    else: print "Nobody wins!"
