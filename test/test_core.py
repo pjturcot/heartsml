@@ -1,6 +1,6 @@
 import pytest
 
-from heartsml.core import Card, Deck, UnorderedDeck, string2card, Trick, HeartsState
+from heartsml.core import Card, Deck, UnorderedDeck, string2card
 
 
 def test_string2card():
@@ -25,17 +25,18 @@ def test_deck():
     assert len(d) == 51
     assert len(d2) == 1
 
+
 def test_unordered_deck():
     d = UnorderedDeck()
     assert len(d) == 0
-    d.append( Card( suit=Card.HEARTS, value=2 ))
+    d.append(Card(suit=Card.HEARTS, value=2))
     assert len(d) == 1
 
     assert Card(suit=Card.HEARTS, value=2) in d
     s = d.__repr__()
 
-    d.append( Card( suit=Card.HEARTS, value=1))
-    cards = list( d )
+    d.append(Card(suit=Card.HEARTS, value=1))
+    cards = list(d)
     assert len(d) == 2
     assert len(cards) == 2
 

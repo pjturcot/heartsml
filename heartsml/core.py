@@ -1,10 +1,13 @@
 # coding: utf8
 
-import random
 import copy
 import logging
+import random
+
 import numpy as np
+
 import UCT
+
 
 class Card(object):
     CLUBS = 0
@@ -52,6 +55,7 @@ for suit, suit_name in Card.SUIT_NAME.iteritems():
         CARD_LOOKUP[suit_name[0] + value_name[0]] = Card(value, suit)
         CARD_LOOKUP[value_name[0] + suit_name[0]] = Card(value, suit)
 
+
 def string2card(cardstr):
     if cardstr not in CARD_LOOKUP:
         raise ValueError("Unrecognized card string: {value}".format(value=cardstr))
@@ -59,18 +63,18 @@ def string2card(cardstr):
 
 
 class UnorderedDeck():
-
     """Class to represent a deck of cards as a single binary vector."""
-    def __init__(self, cards=None ):
-        self._array = np.zeros( (52,), dtype='bool')
+
+    def __init__(self, cards=None):
+        self._array = np.zeros((52,), dtype='bool')
         if cards is not None:
             for c in cards:
-                self._array[ c.index ] = True
+                self._array[c.index] = True
 
     def __repr__(self):
         d = Deck()
         for c in self:
-            d.append( c )
+            d.append(c)
         return d.__repr__()
 
     def __iter__(self):
@@ -79,18 +83,18 @@ class UnorderedDeck():
             yield Card(index=c)
 
     def __contains__(self, card):
-        return self._array[ card.index ]
+        return self._array[card.index]
 
-    def __and__(self, other_deck ):
+    def __and__(self, other_deck):
         d = UnorderedDeck()
         d._array = self.asarray() & other_deck.asarray()
         return d
 
-    def __or__(self, other_deck ):
+    def __or__(self, other_deck):
         d = UnorderedDeck()
         d._array = self.asarray() | other_deck.asarray()
 
-    def __add__(self, other_deck ):
+    def __add__(self, other_deck):
         """Add is treated as set-addition."""
         return self.__or__(other_deck)
 
@@ -101,15 +105,15 @@ class UnorderedDeck():
         return d
 
     def __len__(self):
-        return np.sum( self._array )
+        return np.sum(self._array)
 
-    def append(self, card ):
-        assert self._array[ card.index ] == False
-        self._array[ card.index ] = True
+    def append(self, card):
+        assert self._array[card.index] == False
+        self._array[card.index] = True
 
-    def remove(self, card ):
-        assert self._array[ card.index ] == True
-        self._array[ card.index ] = False
+    def remove(self, card):
+        assert self._array[card.index] == True
+        self._array[card.index] = False
 
     def copy(self):
         d = UnorderedDeck()
@@ -182,8 +186,8 @@ class Player():
         p.cards_won = self.cards_won.copy()
         return p
 
-class Trick(Deck):
 
+class Trick(Deck):
     def __repr__(self):
         return "Trick: " + self.tostring(sort=False)
 
@@ -203,27 +207,27 @@ class Trick(Deck):
     def winner(self):
         if len(self) != 4:
             raise RuntimeError("Cannot determine a winner until 4 cards are played.")
-        return np.argmax([ card.value if card.value != 1 else 14 if card.suit == self.lead_suit else -1 for card in self ])
+        return np.argmax([card.value if card.value != 1 else 14 if card.suit == self.lead_suit else -1 for card in self])
+
 
 class HeartsState():
-
     POINT_CARD_MASK = UnorderedDeck()
     for value in Card.VALUES:
-        POINT_CARD_MASK.append( Card(suit=Card.HEARTS, value=value))
-    POINT_CARD_MASK.append( Card(suit=Card.SPADES, value=12))
+        POINT_CARD_MASK.append(Card(suit=Card.HEARTS, value=value))
+    POINT_CARD_MASK.append(Card(suit=Card.SPADES, value=12))
 
     POINT_VALUES_MASK = POINT_CARD_MASK.asarray().astype('float')
-    POINT_VALUES_MASK[ Card(suit=Card.SPADES, value=12).index ] += 12
+    POINT_VALUES_MASK[Card(suit=Card.SPADES, value=12).index] += 12
 
     SUIT_MASK = dict()
     for suit in Card.SUITS:
         d = UnorderedDeck()
         for value in Card.VALUES:
-            d.append( Card( suit=suit, value=value))
+            d.append(Card(suit=suit, value=value))
         SUIT_MASK[suit] = d
 
     TWO_CLUBS_MASK = UnorderedDeck()
-    TWO_CLUBS_MASK.append( Card(suit=Card.CLUBS, value=2))
+    TWO_CLUBS_MASK.append(Card(suit=Card.CLUBS, value=2))
 
     def __init__(self):
         self.reset()
@@ -243,7 +247,6 @@ class HeartsState():
                 p.hand.append(d.pop())
         assert len(d) == 0
 
-
     def _player_index(self, card):
         """Find which player is holding a specific card."""
         for ip, p in enumerate(self.players):
@@ -256,14 +259,14 @@ class HeartsState():
 
     def all_cards_played(self):
         """Return a vector of all cards played so far."""
-        return np.array( [ p.cards_won.asarray() for p in self.players ]).any(axis=0)
+        return np.array([p.cards_won.asarray() for p in self.players]).any(axis=0)
 
-    def valid_plays(self, unordered_deck ):
+    def valid_plays(self, unordered_deck):
 
         playable_cards = UnorderedDeck()
         if self.round() == 0 and len(self.trick) == 0:  # First play
             return self.TWO_CLUBS_MASK & unordered_deck
-        elif len(self.trick):   # If a card has been played already.. try and follow suit
+        elif len(self.trick):  # If a card has been played already.. try and follow suit
             playable_cards = self.SUIT_MASK[self.trick[0].suit] & unordered_deck
 
             if len(playable_cards) == 0:
@@ -271,14 +274,14 @@ class HeartsState():
                 playable_cards = unordered_deck.copy()
                 if self.round() == 0:
                     playable_cards -= self.POINT_CARD_MASK
-        else:   # Leading card
+        else:  # Leading card
             assert self.round() > 0 and len(self.trick) == 0
             playable_cards = unordered_deck.copy()
             if not self.hearts_broken():
                 playable_cards -= self.POINT_CARD_MASK
 
         if len(playable_cards) == 0:
-            playable_cards = unordered_deck.copy()   # Play hearts
+            playable_cards = unordered_deck.copy()  # Play hearts
             assert len(playable_cards & self.POINT_CARD_MASK) == len(playable_cards)  # Check that all cards are point cards at this point
 
         return list(playable_cards)
@@ -293,46 +296,46 @@ class HeartsState():
         self.turn = -1
         self.trick = Trick()
 
-        self.leading_player = (self._player_index( Card(2, Card.CLUBS))) % 4
+        self.leading_player = (self._player_index(Card(2, Card.CLUBS))) % 4
         self.playerJustMoved = self.leading_player
 
     def Clone(self):
         """Create a deep copy of the HeartsState"""
         st = HeartsState()
-        st.players = [ p.copy() for p in self.players ]
+        st.players = [p.copy() for p in self.players]
         st.turn = self.turn
         st.trick = self.trick.copy()
         st.leading_player = self.leading_player
         st.playerJustMoved = self.playerJustMoved
         return st
 
-    def DoMove(self, card ):
+    def DoMove(self, card):
         possible_plays = self.GetMoves()
         self.turn += 1
-        self.playerJustMoved = ( self.leading_player + self.turn ) % 4
-        logging.debug( "[Round {round}] {trick: <18}. P{player} possible plays: {plays: <50} .... Chose: {card}".format(
+        self.playerJustMoved = (self.leading_player + self.turn) % 4
+        logging.debug("[Round {round}] {trick: <18}. P{player} possible plays: {plays: <50} .... Chose: {card}".format(
             trick=self.trick, player=self.playerJustMoved, plays=possible_plays, card=card, round=self.round()))
-        self.players[ self.playerJustMoved ].hand.remove( card )
-        self.trick.append( card )
+        self.players[self.playerJustMoved].hand.remove(card)
+        self.trick.append(card)
 
         if len(self.trick) == 4:
-            winning_player = ( self.trick.winner() + self.leading_player ) % 4
-            logging.info( "[Round {round}] {trick: <18}  WINNER: {winner} (P{player})".format(
+            winning_player = (self.trick.winner() + self.leading_player) % 4
+            logging.info("[Round {round}] {trick: <18}  WINNER: {winner} (P{player})".format(
                 round=self.round(), trick=self.trick, player=winning_player, winner=self.trick[self.trick.winner()]))
             self.leading_player = winning_player
             for c in self.trick:
-                self.players[ winning_player ].cards_won.append( c )
+                self.players[winning_player].cards_won.append(c)
             self.turn = -1
             self.trick = Trick()
 
     def GetMoves(self):
 
-        next_player = ( self.leading_player + self.turn + 1) % 4
-        possible_plays = self.valid_plays( self.players[ next_player ].hand)
+        next_player = (self.leading_player + self.turn + 1) % 4
+        possible_plays = self.valid_plays(self.players[next_player].hand)
         return list(possible_plays)
 
-    def GetResult(self, player_index ):
-        points = np.array( [ self.count_points( p.cards_won ) for p in self.players ] )
+    def GetResult(self, player_index):
+        points = np.array([self.count_points(p.cards_won) for p in self.players])
         if any(points == 26):
             points = -points + 26
         win_value = points == points.min()
@@ -340,19 +343,19 @@ class HeartsState():
         return win_value[player_index]
 
     def __repr__(self):
-        next_player = ( self.leading_player + self.turn + 1) % 4
+        next_player = (self.leading_player + self.turn + 1) % 4
         return "[Round {round}].\n{trick}\n{player}".format(
-            round=self.round(), trick=self.trick, player=self.players[next_player].hand )
+            round=self.round(), trick=self.trick, player=self.players[next_player].hand)
 
 
 def PUCTPlayHearts(T=0):
     state = HeartsState()
     while (state.GetMoves() != []):
         print str(state)
-        if (state.leading_player + state.turn)%4 == 0:
-            m = UCT.PUCT(rootstate = state, itermax = 100, verbose = False, T=0) # play with values for itermax and verbose = True
+        if (state.leading_player + state.turn) % 4 == 0:
+            m = UCT.PUCT(rootstate=state, itermax=100, verbose=False, T=0)  # play with values for itermax and verbose = True
         else:
-            m = UCT.PUCT(rootstate = state, itermax = 100, verbose = False, T=0)
+            m = UCT.PUCT(rootstate=state, itermax=100, verbose=False, T=0)
         print "Best Move: " + str(m) + "\n"
         logging.root.setLevel(logging.INFO)
         state.DoMove(m)
@@ -361,4 +364,5 @@ def PUCTPlayHearts(T=0):
         print "Player " + str(state.playerJustMoved) + " wins!"
     elif state.GetResult(state.playerJustMoved) == 0.0:
         print "Player " + str(3 - state.playerJustMoved) + " wins!"
-    else: print "Nobody wins!"
+    else:
+        print "Nobody wins!"
