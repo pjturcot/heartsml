@@ -371,7 +371,7 @@ def UCT(rootstate, itermax, verbose = False):
 
     return sorted(rootnode.childNodes, key = lambda c: c.visits)[-1].move # return the move that was most visited
 
-def PUCT(rootstate, itermax, verbose = False):
+def PUCT(rootstate, itermax, verbose = False, T=0):
     """ Conduct a UCT search for itermax iterations starting from rootstate.
         Return the best move from the rootstate.
         Assumes 2 alternating players (player 1 starts), with game results in the range [0.0, 1.0]."""
@@ -407,11 +407,14 @@ def PUCT(rootstate, itermax, verbose = False):
     else: print rootnode.ChildrenToString()
 
     # Select move based on exponentiated visit count
-    T = 1.0   # Only for the first 30 moves... after which we just take argmax (for Go)
-    N_a = np.array( [c.visits for c in rootnode.childNodes] )**(1/T)
-    PI = N_a / np.sum( N_a )
+    if T >= 0:
+        T = 1.0   # Only for the first 30 moves... after which we just take argmax (for Go)
+        N_a = np.array( [c.visits for c in rootnode.childNodes] )**(1/T)
+        PI = N_a / np.sum( N_a )
 
-    child = np.random.choice( rootnode.childNodes, p=PI )
+        child = np.random.choice( rootnode.childNodes, p=PI )
+    else:
+        child = rootnode.childNodes[ np.argmax( [ c.visits for c in rootnode.childNodes ] ) ]
     return child.move # return the move that was most visited
 
 
