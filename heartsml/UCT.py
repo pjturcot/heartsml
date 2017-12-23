@@ -17,6 +17,7 @@
 
 from math import *
 import random
+import numpy as np
 
 class GameState:
     """ A state of the game, i.e. the game board. These are the only functions which are
@@ -285,6 +286,16 @@ class Node:
         """
         s = sorted(self.childNodes, key = lambda c: c.wins/c.visits + sqrt(2*log(self.visits)/c.visits))[-1]
         return s
+
+    def PUCTSelectChild(self):
+        """ Use the PUCT formula to select a child node. Often a constant UCTK is applied so we have
+            lambda c: c.wins/c.visits + UCTK * sqrt(2*log(self.visits)/c.visits to vary the amount of
+            exploration versus exploitation.
+        """
+        PRIOR = 1.0
+        U_num = PRIOR * sqrt( sum( [ c.visits for c in self.childNodes ]))
+        s = sorted(self.childNodes, key = lambda c: c.wins/c.visits + U_num/(1 + c.visits))[-1]
+        return s
     
     def AddChild(self, m, s):
         """ Remove m from untriedMoves and add a new child node for this move.
@@ -341,7 +352,7 @@ def UCT(rootstate, itermax, verbose = False):
 
         # Expand
         if node.untriedMoves != []: # if we can expand (i.e. state/node is non-terminal)
-            m = random.choice(node.untriedMoves) 
+            m = random.choice(node.untriedMoves)
             state.DoMove(m)
             node = node.AddChild(m,state) # add child and descend tree
 
@@ -359,7 +370,51 @@ def UCT(rootstate, itermax, verbose = False):
     else: print rootnode.ChildrenToString()
 
     return sorted(rootnode.childNodes, key = lambda c: c.visits)[-1].move # return the move that was most visited
-                
+
+def PUCT(rootstate, itermax, verbose = False):
+    """ Conduct a UCT search for itermax iterations starting from rootstate.
+        Return the best move from the rootstate.
+        Assumes 2 alternating players (player 1 starts), with game results in the range [0.0, 1.0]."""
+
+    rootnode = Node(state = rootstate)
+
+    for i in range(itermax):
+        node = rootnode
+        state = rootstate.Clone()
+
+        # Select
+        while node.untriedMoves == [] and node.childNodes != []: # node is fully expanded and non-terminal
+            node = node.PUCTSelectChild()
+            state.DoMove(node.move)
+
+        # Expand
+        if node.untriedMoves != []: # if we can expand (i.e. state/node is non-terminal)
+            m = random.choice(node.untriedMoves)
+            state.DoMove(m)
+            node = node.AddChild(m,state) # add child and descend tree
+
+        # Rollout - this can often be made orders of magnitude quicker using a state.GetRandomMove() function
+        while state.GetMoves() != []: # while state is non-terminal
+            state.DoMove(random.choice(state.GetMoves()))
+
+        # Backpropagate
+        while node != None: # backpropagate from the expanded node and work back to the root node
+            node.Update(state.GetResult(node.playerJustMoved)) # state is terminal. Update node with result from POV of node.playerJustMoved
+            node = node.parentNode
+
+    # Output some information about the tree - can be omitted
+    if (verbose): print rootnode.TreeToString(0)
+    else: print rootnode.ChildrenToString()
+
+    # Select move based on exponentiated visit count
+    T = 1.0   # Only for the first 30 moves... after which we just take argmax (for Go)
+    N_a = np.array( [c.visits for c in rootnode.childNodes] )**(1/T)
+    PI = N_a / np.sum( N_a )
+
+    child = np.random.choice( rootnode.childNodes, p=PI )
+    return child.move # return the move that was most visited
+
+
 def UCTPlayGame():
     """ Play a sample game between two UCT players where each player gets a different number 
         of UCT iterations (= simulations = tree nodes).
@@ -372,7 +427,7 @@ def UCTPlayGame():
         if state.playerJustMoved == 1:
             m = UCT(rootstate = state, itermax = 1000, verbose = False) # play with values for itermax and verbose = True
         else:
-            m = UCT(rootstate = state, itermax = 100, verbose = False)
+            m = UCT(rootstate = state, itermax = 1000, verbose = False)
         print "Best Move: " + str(m) + "\n"
         state.DoMove(m)
     if state.GetResult(state.playerJustMoved) == 1.0:

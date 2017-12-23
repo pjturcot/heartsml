@@ -4,8 +4,7 @@ import random
 import copy
 import logging
 import numpy as np
-from UCT import UCT
-
+import UCT
 
 class Card(object):
     CLUBS = 0
@@ -381,9 +380,27 @@ def UCTPlayHearts():
     while (state.GetMoves() != []):
         print str(state)
         if (state.leading_player + state.turn)%4 == 0:
-            m = UCT(rootstate = state, itermax = 1000, verbose = False) # play with values for itermax and verbose = True
+            m = UCT.UCT(rootstate = state, itermax = 1000, verbose = False) # play with values for itermax and verbose = True
         else:
-            m = UCT(rootstate = state, itermax = 100, verbose = False)
+            m = UCT.UCT(rootstate = state, itermax = 100, verbose = False)
+        print "Best Move: " + str(m) + "\n"
+        logging.root.setLevel(logging.INFO)
+        state.DoMove(m)
+        logging.root.setLevel(logging.WARNING)
+    if state.GetResult(state.playerJustMoved) == 1.0:
+        print "Player " + str(state.playerJustMoved) + " wins!"
+    elif state.GetResult(state.playerJustMoved) == 0.0:
+        print "Player " + str(3 - state.playerJustMoved) + " wins!"
+    else: print "Nobody wins!"
+
+def PUCTPlayHearts():
+    state = HeartsState()
+    while (state.GetMoves() != []):
+        print str(state)
+        if (state.leading_player + state.turn)%4 == 0:
+            m = UCT.PUCT(rootstate = state, itermax = 1000, verbose = False) # play with values for itermax and verbose = True
+        else:
+            m = UCT.PUCT(rootstate = state, itermax = 100, verbose = False)
         print "Best Move: " + str(m) + "\n"
         logging.root.setLevel(logging.INFO)
         state.DoMove(m)
