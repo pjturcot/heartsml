@@ -207,7 +207,7 @@ class Trick(Deck):
     def winner(self):
         if len(self) != 4:
             raise RuntimeError("Cannot determine a winner until 4 cards are played.")
-        return np.argmax([card.value if card.value != 1 else 14 if card.suit == self.lead_suit else -1 for card in self])
+        return np.argmax([(card.value if card.value != 1 else 14) if card.suit == self.lead_suit else -1 for card in self])
 
     def asarray(self):
         a = []
