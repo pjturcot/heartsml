@@ -283,13 +283,19 @@ class Node:
         Crashes if state not specified.
     """
 
-    def __init__(self, move=None, parent=None, state=None):
+    def __init__(self, move=None, parent=None, state=None, net=None):
         self.move = move  # the move that got us to this node - "None" for the root node
         self.parentNode = parent  # "None" for the root node
         self.childNodes = []
+        self.childPriors = []
         self.wins = 0
         self.visits = 0
         self.untriedMoves = state.GetMoves()  # future child nodes
+        if net is not None:
+            self.movePriors = net.predict( state )[0]
+        else:
+            self.movePriors = None
+        self.net = net
         self.playerJustMoved = state.playerJustMoved  # the only part of the state that the Node needs later
 
     def UCTSelectChild(self):
@@ -305,18 +311,22 @@ class Node:
             lambda c: c.wins/c.visits + UCTK * sqrt(2*log(self.visits)/c.visits to vary the amount of
             exploration versus exploitation.
         """
-        PRIOR = 1.0
-        U_num = PRIOR * sqrt(sum([c.visits for c in self.childNodes]))
-        s = sorted(self.childNodes, key=lambda c: c.wins / c.visits + U_num / (1 + c.visits))[-1]
+        U_num = sqrt(sum([c.visits for c in self.childNodes]))
+        s = sorted( zip(self.childNodes, self.childPriors), key=lambda cp: cp[0].wins / cp[0].visits + cp[1]* U_num / (1 + cp[0].visits))[-1][0]
         return s
 
     def AddChild(self, m, s):
         """ Remove m from untriedMoves and add a new child node for this move.
             Return the added child node
         """
-        n = Node(move=m, parent=self, state=s)
+        n = Node(move=m, parent=self, state=s, net=self.net)
+        ix = self.untriedMoves.index(m)
         self.untriedMoves.remove(m)
         self.childNodes.append(n)
+        if self.movePriors is not None:
+            self.childPriors.append(m.index)
+        else:
+            self.childPriors.append(1)
         return n
 
     def Update(self, result):
@@ -387,12 +397,10 @@ def UCT(rootstate, itermax, verbose=False):
     return sorted(rootnode.childNodes, key=lambda c: c.visits)[-1].move  # return the move that was most visited
 
 
-def PUCT(rootstate, itermax, verbose=False, T=0):
+def PUCT(rootnode, rootstate, itermax, verbose=False, T=0, net=None):
     """ Conduct a UCT search for itermax iterations starting from rootstate.
         Return the best move from the rootstate.
         Assumes 2 alternating players (player 1 starts), with game results in the range [0.0, 1.0]."""
-
-    rootnode = Node(state=rootstate)
 
     for i in range(itermax):
         node = rootnode
@@ -429,11 +437,15 @@ def PUCT(rootstate, itermax, verbose=False, T=0):
         T = 1.0  # Only for the first 30 moves... after which we just take argmax (for Go)
         N_a = np.array([c.visits for c in rootnode.childNodes]) ** (1 / T)
         PI = N_a / np.sum(N_a)
-
         child = np.random.choice(rootnode.childNodes, p=PI)
     else:
-        child = rootnode.childNodes[np.argmax([c.visits for c in rootnode.childNodes])]
-    return child.move  # return the move that was most visited
+        ix = np.argmax([c.visits for c in rootnode.childNodes])
+        child = rootnode.childNodes[ix]
+        PI = np.zeros( (len(rootnode.childNodes)))
+        PI[ix] = 1.0
+    moves = [ c.move for c in rootnode.childNodes]
+    print zip( PI, moves )
+    return (child.move, child, moves, PI)  # return the move that was most visited
 
 
 def UCTPlayGame():

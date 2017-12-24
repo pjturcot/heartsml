@@ -209,6 +209,15 @@ class Trick(Deck):
             raise RuntimeError("Cannot determine a winner until 4 cards are played.")
         return np.argmax([card.value if card.value != 1 else 14 if card.suit == self.lead_suit else -1 for card in self])
 
+    def asarray(self):
+        a = []
+        for c in self:
+            a.append(c.asarray())
+        while len(a) < 4:
+            a.append( np.zeros((52,)))
+        return np.array(a)
+
+
 
 class HeartsState():
     POINT_CARD_MASK = UnorderedDeck()
@@ -328,10 +337,11 @@ class HeartsState():
             self.turn = -1
             self.trick = Trick()
 
-    def GetMoves(self):
+    def current_player(self):
+        return (self.leading_player + self.turn + 1) % 4
 
-        next_player = (self.leading_player + self.turn + 1) % 4
-        possible_plays = self.valid_plays(self.players[next_player].hand)
+    def GetMoves(self):
+        possible_plays = self.valid_plays(self.players[self.current_player()].hand)
         return list(possible_plays)
 
     def GetResult(self, player_index):
@@ -343,26 +353,5 @@ class HeartsState():
         return win_value[player_index]
 
     def __repr__(self):
-        next_player = (self.leading_player + self.turn + 1) % 4
         return "[Round {round}].\n{trick}\n{player}".format(
-            round=self.round(), trick=self.trick, player=self.players[next_player].hand)
-
-
-def PUCTPlayHearts(T=0):
-    state = HeartsState()
-    while (state.GetMoves() != []):
-        print str(state)
-        if (state.leading_player + state.turn) % 4 == 0:
-            m = UCT.PUCT(rootstate=state, itermax=100, verbose=False, T=0)  # play with values for itermax and verbose = True
-        else:
-            m = UCT.PUCT(rootstate=state, itermax=100, verbose=False, T=0)
-        print "Best Move: " + str(m) + "\n"
-        logging.root.setLevel(logging.INFO)
-        state.DoMove(m)
-        logging.root.setLevel(logging.WARNING)
-    if state.GetResult(state.playerJustMoved) == 1.0:
-        print "Player " + str(state.playerJustMoved) + " wins!"
-    elif state.GetResult(state.playerJustMoved) == 0.0:
-        print "Player " + str(3 - state.playerJustMoved) + " wins!"
-    else:
-        print "Nobody wins!"
+            round=self.round(), trick=self.trick, player=self.players[self.current_player()])
