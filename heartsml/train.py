@@ -67,22 +67,27 @@ class HeartsNet():
 
 class HeartsTrainer():
     """Class to play a game of hearts using the PUCT algorithm while keeping track of state variables."""
-    def __init__(self, heartsnet, mcts_iter_max=100):
+    def __init__(self, heartsnet, mcts_iter_max=100, max_score=50):
         self.state = None
         self.net = heartsnet
         self.mcts_iter_max=mcts_iter_max
         self.game_moves = []
+        self.max_score = max_score
 
-    def train(self, n_games=100, n_iters_per_game=10):
+    def train(self, n_games=100, n_iters_per_game=10, T=0):
         for i in range(n_games):
+            print "**************************************************************************"
             print "Playing game {i} of {n_games}".format( i=i+1, n_games=n_games)
-            self.play_game(T=0)
+            print "**************************************************************************"
+            self.play_game(T=T)
             self.train_net( n_iters_per_game, batch_size=100)
 
     def play_game(self, T=0):
-        self.state = core.HeartsState()
-        node = UCT.Node(state=self.state, net=self.net)
+        self.state = core.HeartsState(max_score=self.max_score)
+
         while self.state.GetMoves() != []:
+            if self.state.round() == 0 and self.state.turn == -1:
+                node = UCT.Node(state=self.state, net=self.net)
             print str(self.state)
             if (self.state.leading_player + self.state.turn) % 4 == 0:
                 m, node, moves, PI = UCT.PUCT(rootnode=node, rootstate=self.state, itermax=self.mcts_iter_max, verbose=False, T=T, net=self.net)  # play with values for itermax and verbose = True

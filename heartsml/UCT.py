@@ -306,13 +306,13 @@ class Node:
         s = sorted(self.childNodes, key=lambda c: c.wins / c.visits + sqrt(2 * log(self.visits) / c.visits))[-1]
         return s
 
-    def PUCTSelectChild(self):
+    def PUCTSelectChild(self, C_PUCT=0.1):
         """ Use the PUCT formula to select a child node. Often a constant UCTK is applied so we have
             lambda c: c.wins/c.visits + UCTK * sqrt(2*log(self.visits)/c.visits to vary the amount of
             exploration versus exploitation.
         """
         U_num = sqrt(sum([c.visits for c in self.childNodes]))
-        s = sorted( zip(self.childNodes, self.childPriors), key=lambda cp: cp[0].wins / cp[0].visits + cp[1]* U_num / (1 + cp[0].visits))[-1][0]
+        s = sorted( zip(self.childNodes, self.childPriors), key=lambda cp: cp[0].wins / cp[0].visits + C_PUCT * cp[1]* U_num / (1 + cp[0].visits))[-1][0]
         return s
 
     def AddChild(self, m, s):
@@ -433,18 +433,20 @@ def PUCT(rootnode, rootstate, itermax, verbose=False, T=0, net=None):
         print rootnode.ChildrenToString()
 
     # Select move based on exponentiated visit count
-    if T >= 0:
-        T = 1.0  # Only for the first 30 moves... after which we just take argmax (for Go)
-        N_a = np.array([c.visits for c in rootnode.childNodes]) ** (1 / T)
+    if T > 0:
+        N_a = np.array([c.visits for c in rootnode.childNodes], dtype='float') ** (1 / T)
         PI = N_a / np.sum(N_a)
         child = np.random.choice(rootnode.childNodes, p=PI)
+        probs = PI
     else:
-        ix = np.argmax([c.visits for c in rootnode.childNodes])
+        N_a = np.array([c.visits for c in rootnode.childNodes], dtype='float')
+        ix = np.argmax(N_a)
         child = rootnode.childNodes[ix]
         PI = np.zeros( (len(rootnode.childNodes)))
         PI[ix] = 1.0
+        probs = N_a / np.sum(N_a)
     moves = [ c.move for c in rootnode.childNodes]
-    print zip( PI, moves )
+    print sorted( zip( PI, probs, moves ), key=lambda x: x[1], reverse=True)
     return (child.move, child, moves, PI)  # return the move that was most visited
 
 

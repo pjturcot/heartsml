@@ -238,7 +238,9 @@ class HeartsState():
     TWO_CLUBS_MASK = UnorderedDeck()
     TWO_CLUBS_MASK.append(Card(suit=Card.CLUBS, value=2))
 
-    def __init__(self):
+    def __init__(self, max_score=50, seed=None):
+        self.randomstate = np.random.RandomState(seed)
+        self.max_score=max_score
         self.reset()
 
     def count_points(self, unordered_deck):
@@ -248,12 +250,20 @@ class HeartsState():
         """Deal a round of cards to all the players."""
         for p in self.players:
             assert len(p.hand) == 0
+            p.cards_won = UnorderedDeck()
+
         d = Deck()
         d.initialize()
-        d.shuffle()
+        self.randomstate.shuffle( d )
         for i_round in range(13):
             for ip, p in enumerate(self.players):
                 p.hand.append(d.pop())
+        self.turn = -1
+        self.trick = Trick()
+
+        self.leading_player = (self._player_index(Card(2, Card.CLUBS))) % 4
+        self.playerJustMoved = self.leading_player
+
         assert len(d) == 0
 
     def _player_index(self, card):
@@ -302,11 +312,6 @@ class HeartsState():
     def reset(self):
         self.players = [Player(id) for id in range(4)]
         self._deal_cards()
-        self.turn = -1
-        self.trick = Trick()
-
-        self.leading_player = (self._player_index(Card(2, Card.CLUBS))) % 4
-        self.playerJustMoved = self.leading_player
 
     def Clone(self):
         """Create a deep copy of the HeartsState"""
@@ -316,6 +321,8 @@ class HeartsState():
         st.trick = self.trick.copy()
         st.leading_player = self.leading_player
         st.playerJustMoved = self.playerJustMoved
+        st.max_score = self.max_score
+        st.randomstate = copy.deepcopy(self.randomstate)
         return st
 
     def DoMove(self, card):
@@ -337,6 +344,22 @@ class HeartsState():
             self.turn = -1
             self.trick = Trick()
 
+            if len(self.players[self.playerJustMoved].hand) == 0:   # No more cards... game over?
+                points = np.array([self.count_points(p.cards_won) for p in self.players])
+                if any(points == 26):
+                    points = -points + 26
+                for p, player in zip( points.tolist(), self.players ):
+                    player.points += p
+                if not self.is_game_over():
+                    logging.info("Points by player so far in the game: {points}".format(
+                        points = [ p.points for p in self.players ] ))
+                    logging.info("Dealing another round of cards.")
+                    self._deal_cards()
+
+    def is_game_over(self):
+        player_points = np.array( [ p.points for p in self.players] )
+        return (player_points >= self.max_score).any()
+
     def current_player(self):
         return (self.leading_player + self.turn + 1) % 4
 
@@ -345,10 +368,8 @@ class HeartsState():
         return list(possible_plays)
 
     def GetResult(self, player_index):
-        points = np.array([self.count_points(p.cards_won) for p in self.players])
-        if any(points == 26):
-            points = -points + 26
-        win_value = points == points.min()
+        player_points = np.array( [ p.points for p in self.players] )
+        win_value = player_points == player_points.min()
         win_value = win_value.astype('float') / win_value.sum()
         return win_value[player_index]
 
