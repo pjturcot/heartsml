@@ -290,9 +290,10 @@ class Node:
         self.childPriors = []
         self.wins = 0
         self.visits = 0
+        self.value = None
         self.untriedMoves = state.GetMoves()  # future child nodes
         if net is not None:
-            self.movePriors = net.predict( state )[0]
+            self.movePriors, self.value = net.predict( state )
         else:
             self.movePriors = None
         self.net = net
@@ -397,7 +398,7 @@ def UCT(rootstate, itermax, verbose=False):
     return sorted(rootnode.childNodes, key=lambda c: c.visits)[-1].move  # return the move that was most visited
 
 
-def PUCT(rootnode, rootstate, itermax, verbose=False, T=0, net=None):
+def PUCT(rootnode, rootstate, itermax, verbose=False, T=0):
     """ Conduct a UCT search for itermax iterations starting from rootstate.
         Return the best move from the rootstate.
         Assumes 2 alternating players (player 1 starts), with game results in the range [0.0, 1.0]."""
@@ -423,7 +424,7 @@ def PUCT(rootnode, rootstate, itermax, verbose=False, T=0, net=None):
 
         # Backpropagate
         while node != None:  # backpropagate from the expanded node and work back to the root node
-            node.Update(state.GetResult(node.playerJustMoved))  # state is terminal. Update node with result from POV of node.playerJustMoved
+            node.Update(node.value)  # state is terminal. Update node with result from POV of node.playerJustMoved
             node = node.parentNode
 
     # Output some information about the tree - can be omitted
