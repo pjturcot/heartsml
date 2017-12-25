@@ -6,7 +6,7 @@ import collections
 import numpy as np
 import random
 
-GameMoves = collections.namedtuple( "GameMoves", [ "state", "pi", "moves"])
+GameMoves = collections.namedtuple( "GameMoves", [ "state", "pi", "moves", "value"])
 
 class HeartsNet():
 
@@ -72,6 +72,7 @@ class HeartsTrainer():
         self.net = heartsnet
         self.mcts_iter_max=mcts_iter_max
         self.game_moves = []
+
         self.max_score = max_score
 
     def train(self, n_games=100, n_iters_per_game=10, T=0):
@@ -84,26 +85,20 @@ class HeartsTrainer():
 
     def play_game(self, T=0):
         self.state = core.HeartsState(max_score=self.max_score)
+        game_moves = []
 
         while self.state.GetMoves() != []:
             if self.state.round() == 0 and self.state.turn == -1:
                 node = UCT.Node(state=self.state, net=self.net)
             print str(self.state)
-            if (self.state.leading_player + self.state.turn) % 4 == 0:
-                m, node, moves, PI = UCT.PUCT(rootnode=node, rootstate=self.state, itermax=self.mcts_iter_max, verbose=False, T=T, net=self.net)  # play with values for itermax and verbose = True
-            else:
-                m, node, moves, PI = UCT.PUCT(rootnode=node, rootstate=self.state, itermax=self.mcts_iter_max, verbose=False, T=T, net=self.net)
+            m, node, moves, PI = UCT.PUCT(rootnode=node, rootstate=self.state, itermax=self.mcts_iter_max, verbose=False, T=T, net=self.net)  # play with values for itermax and verbose = True
             print "Best Move: " + str(m) + "\n"
-            self.game_moves.append( GameMoves( state=self.state.Clone(), moves=moves, pi=PI))
+            game_moves.append( GameMoves( state=self.state.Clone(), moves=moves, pi=PI, value=None))
             logging.root.setLevel(logging.INFO)
             self.state.DoMove(m)
             logging.root.setLevel(logging.WARNING)
-        if self.state.GetResult(self.state.playerJustMoved) == 1.0:
-            print "Player " + str(self.state.playerJustMoved) + " wins!"
-        elif self.state.GetResult(self.state.playerJustMoved) == 0.0:
-            print "Player " + str(3 - self.state.playerJustMoved) + " wins!"
-        else:
-            print "Nobody wins!"
+        for g in game_moves:
+            self.game_moves.append( GameMoves( state=g.state, moves=g.moves, pi=g.pi, value=self.state.GetResult(g.state.current_player())))
 
     def train_net(self, n_iterations, batch_size=8 ):
 
@@ -119,7 +114,7 @@ class HeartsTrainer():
                 m.state.current_player()
                 x_input.append(features)
                 y_action.append( action_probs )
-                y_value.append( self.state.GetResult(m.state.current_player()) )
+                y_value.append( m.value )
             inputs = { 'input' : np.array(x_input) }
             outputs = { 'action': np.array(y_action),
                         'value': np.array(y_value) }
