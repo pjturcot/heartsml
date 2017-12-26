@@ -238,8 +238,11 @@ class HeartsState():
     TWO_CLUBS_MASK = UnorderedDeck()
     TWO_CLUBS_MASK.append(Card(suit=Card.CLUBS, value=2))
 
-    def __init__(self, max_score=50, seed=None):
-        self.randomstate = np.random.RandomState(seed)
+    def __init__(self, max_score=50, randomstate=None):
+        if randomstate is None:
+            self.randomstate = np.random.RandomState(None)
+        else:
+            self.randomstate = randomstate
         self.max_score=max_score
         self.reset()
 
@@ -315,14 +318,13 @@ class HeartsState():
 
     def Clone(self):
         """Create a deep copy of the HeartsState"""
-        st = HeartsState()
+        st = HeartsState( randomstate=copy.deepcopy( self.randomstate ))
         st.players = [p.copy() for p in self.players]
         st.turn = self.turn
         st.trick = self.trick.copy()
         st.leading_player = self.leading_player
         st.playerJustMoved = self.playerJustMoved
         st.max_score = self.max_score
-        st.randomstate = copy.deepcopy(self.randomstate)
         return st
 
     def DoMove(self, card):
@@ -369,9 +371,10 @@ class HeartsState():
 
     def GetResult(self, player_index):
         player_points = np.array( [ p.points for p in self.players] )
-        win_value = player_points == player_points.min()
-        win_value = win_value.astype('float') / win_value.sum()
-        return win_value[player_index]
+        return float(self.max_score - player_points[player_index])
+        # win_value = player_points == player_points.min()
+        # win_value = win_value.astype('float') / win_value.sum()
+        # return win_value[player_index]
 
     def __repr__(self):
         return "[Round {round}].\n{trick}\n{player}".format(
