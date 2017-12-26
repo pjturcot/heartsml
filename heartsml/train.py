@@ -200,15 +200,16 @@ class AlphaZeroNode:
         action_score = Q + C_PUCT * P * U_num / (1 + N )
         return action_score
 
-    def RunSimulations(self, n_simulations=None, n_max_simulations=None):
+    def RunSimulations(self, root_state, n_simulations=None, n_max_simulations=None):
         """Run branching simulations from this node starting as the root node."""
+        assert self.actions == root_state.GetMoves()
         self.InitEdges()
         n_current_simulations = sum( [ e.visits for e in self.edges ] )
         if n_max_simulations and n_simulations is None:
             n_simulations = n_max_simulations - n_current_simulations
 
         for i_simulation in range(n_simulations):
-
+            state = root_state.Clone()
             edges_traversed = []
             node = self
             while not node.is_leaf():
@@ -217,19 +218,28 @@ class AlphaZeroNode:
                 else:
                     e = node.PUCTSelectChild()
                 edges_traversed.append( e )
-                node = e.get_child()
+                state.DoMove(e.action)
+                if e.child is None:
+                    node = AlphaZeroNode( state=state, net=node.net )
+                    node.InitEdges()
+                    e.child = node
+                else:
+                    node = e.child
+            if e.child is None:
+                node = AlphaZeroNode( state=state, net=node.net )
                 node.InitEdges()
+                e.child = node
 
             # We've reached the end
             value = None
             for e in edges_traversed[::-1]:
                 if value is None:
-                    value = e.get_child().value
-                    print "Found value: {value}".format(value=value)
+                    value = e.child.value
+                    logging.debug( "Found value: {value}".format(value=value) )
                 e.visits += 1
                 e.total_action_value += value
                 e.mean_action_value = e.total_action_value / e.visits
-                print e
+                logging.debug( e )
 
     def GetMCTSResult(self, T=0.0):
         if T > 0:
