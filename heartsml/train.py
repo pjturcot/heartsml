@@ -10,7 +10,8 @@ GameMoves = collections.namedtuple( "GameMoves", [ "state", "pi", "moves", "valu
 
 class HeartsNet():
 
-    def __init__(self):
+    def __init__(self, value_activation='sigmoid'):
+        self.value_activation = value_activation
         self.model = self.build_net()
 
     def extract_state_feature(self, state):
@@ -47,9 +48,11 @@ class HeartsNet():
         y_value = keras.layers.Dense(128, kernel_regularizer=regularizer, name='value_dense5')(y_value)
         y_value = keras.layers.Activation('relu')(y_value)
         y_value = keras.layers.Flatten()(y_value)
-        y_value = keras.layers.Dense(1, kernel_regularizer=regularizer, name='value_dense6')(y_value)
-        y_value = keras.layers.Activation('sigmoid', name="value")(y_value)
-
+        if self.value_activation is None:
+            y_value = keras.layers.Dense(1, kernel_regularizer=regularizer, name='value')(y_value)
+        else:
+            y_value = keras.layers.Dense(1, kernel_regularizer=regularizer, name='value_dense6')(y_value)
+            y_value = keras.layers.Activation(self.value_activation, name="value")(y_value)
 
         m = keras.models.Model( [ input ], [ y_action, y_value ] )
         sgd = keras.optimizers.SGD(lr=0.02, momentum=0.9)
@@ -75,13 +78,13 @@ class HeartsTrainer():
 
         self.max_score = max_score
 
-    def train(self, n_games=100, n_iters_per_game=10, T=0):
+    def train(self, n_games=100, n_iters_per_game=10, T=0, batch_size=100):
         for i in range(n_games):
             print "**************************************************************************"
             print "Playing game {i} of {n_games}".format( i=i+1, n_games=n_games)
             print "**************************************************************************"
             self.play_game(T=T)
-            self.train_net( n_iters_per_game, batch_size=100)
+            self.train_net( n_iters_per_game, batch_size=batch_size)
 
     def play_game(self, T=0):
         self.state = core.HeartsState(max_score=self.max_score)
@@ -91,7 +94,8 @@ class HeartsTrainer():
             if self.state.round() == 0 and self.state.turn == -1:
                 node = UCT.Node(state=self.state, net=self.net)
             print str(self.state)
-            m, node, moves, PI = UCT.PUCT(rootnode=node, rootstate=self.state, itermax=self.mcts_iter_max, verbose=False, T=T, net=self.net)  # play with values for itermax and verbose = True
+            m, node, moves, PI = UCT.PUCT(rootnode=node, rootstate=self.state, itermax=self.mcts_iter_max, verbose=False, T=T)  # play with values for itermax and verbose = True
+            node.parent = None  # Change it from being a child-node to a rootnode
             print "Best Move: " + str(m) + "\n"
             game_moves.append( GameMoves( state=self.state.Clone(), moves=moves, pi=PI, value=None))
             logging.root.setLevel(logging.INFO)
@@ -122,4 +126,126 @@ class HeartsTrainer():
 
     def predict(self, state ):
         return self.net.predict( state )
+
+
+class AlphaZeroEdge:
+
+    def __init__(self, action=None, prior=None, parent=None, child=None, value=0.0 ):
+        self.action = action
+        self.prior = prior
+
+        self.parent = parent
+        self.child = child
+
+        self.visits = 0   # MCTS algorithm tracking visits through this edge
+        self.total_action_value = 0.0   #
+        self.mean_action_value = value
+
+    def __repr__(self):
+        return "Action:{action} (N={visits}, Q={mean_value}, T={total_value}, P={prior}".format(
+            action=self.action, visits=self.visits, mean_value=self.mean_action_value, total_value=self.total_action_value, prior=self.prior)
+
+    def get_child(self):
+        """Get the node encoded by this action."""
+        if self.child is None:
+            print "Initializing child state for edge: {edge}".format( edge=self )
+            s = self.parent.state.Clone()
+            s.DoMove( self.action )
+            self.child = AlphaZeroNode( state=s, net=self.parent.net )
+        else:
+            print "Returning existing node: {edge}".format( edge=self )
+        return self.child
+
+
+class AlphaZeroNode:
+
+    def __init__(self, state=None, net=None):
+        self.state = state
+        self.net = net
+        self.probs, self.value = self.net.predict( state )
+        self.probs = self.probs.flatten()
+        self.value = float(self.value)
+
+        self.actions = self.state.GetMoves()
+        self.edges = None
+
+    def is_leaf(self):
+        return len(self.actions) == 0
+
+    def InitEdges(self):
+        """Initialize all the actions from the current state."""
+        if self.edges is None:
+            self.edges = []
+            prior_total = sum( [self.probs[a.index] for a in self.actions] )
+            for a in self.actions:
+                self.edges.append( AlphaZeroEdge( action=a, prior=self.probs[a.index]/prior_total, parent=self, child=None ))
+
+
+    def PUCTSelectChild(self, C_PUCT=26.0, dirichlet=None):
+        """ Use the PUCT formula to select a child node. Often a constant UCTK is applied so we have
+            lambda c: c.wins/c.visits + UCTK * sqrt(2*log(self.visits)/c.visits to vary the amount of
+            exploration versus exploitation.
+        """
+        action_score = self.get_action_scores( C_PUCT=C_PUCT, dirichlet=dirichlet )
+        i = action_score.argmax()
+        return self.edges[i]
+
+    def get_action_scores(self, C_PUCT=26.0, dirichlet=None ):
+        N = np.array( [ e.visits for e in self.edges ] )
+        U_num = np.sqrt(N.sum())
+        Q = np.array([ e.mean_action_value for e in self.edges ])
+        P = np.array([ e.prior for e in self.edges ] )
+        if dirichlet is not None:
+            P += np.random.dirichlet( [dirichlet]*52 , 1 )[0, :P.size]
+        action_score = Q + C_PUCT * P * U_num / (1 + N )
+        return action_score
+
+    def RunSimulations(self, n_simulations=None, n_max_simulations=None):
+        """Run branching simulations from this node starting as the root node."""
+        self.InitEdges()
+        n_current_simulations = sum( [ e.visits for e in self.edges ] )
+        if n_max_simulations and n_simulations is None:
+            n_simulations = n_max_simulations - n_current_simulations
+
+        for i_simulation in range(n_simulations):
+
+            edges_traversed = []
+            node = self
+            while not node.is_leaf():
+                if node == self:
+                    e = node.PUCTSelectChild( dirichlet=0.9)   # Sample with noise.
+                else:
+                    e = node.PUCTSelectChild()
+                edges_traversed.append( e )
+                node = e.get_child()
+                node.InitEdges()
+
+            # We've reached the end
+            value = None
+            for e in edges_traversed[::-1]:
+                if value is None:
+                    value = e.get_child().value
+                    print "Found value: {value}".format(value=value)
+                e.visits += 1
+                e.total_action_value += value
+                e.mean_action_value = e.total_action_value / e.visits
+                print e
+
+    def GetMCTSResult(self, T=0.0):
+        if T > 0:
+            N_a = np.array([e.visits for e in self.edges], dtype='float') ** (1 / T)
+            PI = N_a / np.sum(N_a)
+            edge = np.random.choice( self.edges , p=PI )
+        elif T == 0:
+            N = np.array([e.visits for e in self.edges])
+            ix = N.argmax()
+            edge = self.edges[ix]
+            PI = np.zeros( (len(self.edges)))
+            PI[ix] = 1.0
+        return edge.child, self.actions, PI
+
+
+
+
+
 
