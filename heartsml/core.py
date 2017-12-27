@@ -369,12 +369,17 @@ class HeartsState():
         possible_plays = self.valid_plays(self.players[self.current_player()].hand)
         return list(possible_plays)
 
-    def GetResult(self, player_index):
+    def GetResult(self, player_index, result_type='winner'):
         player_points = np.array( [ p.points for p in self.players] )
-        return float(self.max_score - player_points[player_index])
-        # win_value = player_points == player_points.min()
-        # win_value = win_value.astype('float') / win_value.sum()
-        # return win_value[player_index]
+        if result_type == 'winner':
+            win_value = np.ones( player_points.shape )*-1
+            win_value[ player_points == player_points.min() ] = 1
+            return win_value[player_index]
+        elif result_type == 'points':
+            return ((self.max_score - player_points) / 25.0)[player_index],
+        else:
+            raise ValueError("Unknown ")
+
 
     def __repr__(self):
         return "[Round {round}].\n{trick}\n{player}".format(

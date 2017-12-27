@@ -10,15 +10,18 @@ GameMoves = collections.namedtuple( "GameMoves", [ "state", "pi", "moves", "valu
 
 class HeartsNet():
 
-    def __init__(self, value_activation='sigmoid'):
+    def __init__(self, result_type='points', value_activation='tanh', lr=0.2):
         self.value_activation = value_activation
+        self.result_type = result_type
+        self.lr = lr
         self.model = self.build_net()
 
     def extract_state_feature(self, state):
+        player_order = (np.arange(4)+state.current_player()) % 4
         trick_array = state.trick.asarray()   # (4, 52) binary vector
         current_hand = state.players[ state.current_player() ].hand.asarray()
-        all_cards_played = state.all_cards_played()
-        feature = np.vstack( (current_hand, trick_array, all_cards_played ) )
+        cards_played_by_player = np.array([p.cards_won.asarray() for p in state.players])[ player_order ]
+        feature = np.vstack( (current_hand, trick_array, cards_played_by_player ) )
         return feature.transpose()
 
     def build_net(self, regularizer=keras.regularizers.l2(1e-4)):
@@ -55,7 +58,7 @@ class HeartsNet():
             y_value = keras.layers.Activation(self.value_activation, name="value")(y_value)
 
         m = keras.models.Model( [ input ], [ y_action, y_value ] )
-        sgd = keras.optimizers.SGD(lr=0.02, momentum=0.9)
+        sgd = keras.optimizers.SGD(lr=self.lr, momentum=0.9)
         m.compile( optimizer=sgd, loss={"action": "binary_crossentropy", "value": "mean_squared_error"} )
         return m
 
@@ -70,12 +73,13 @@ class HeartsNet():
 
 class HeartsTrainer():
     """Class to play a game of hearts using the PUCT algorithm while keeping track of state variables."""
-    def __init__(self, heartsnet, mcts_iter_max=100, max_score=50):
+    def __init__(self, heartsnet, mcts_iter_max=100, max_score=50, mcts_c_puct=1.0):
         self.state = None
         self.net = heartsnet
+        self.result_type = heartsnet.result_type
         self.mcts_iter_max=mcts_iter_max
+        self.mcts_c_puct=mcts_c_puct
         self.game_moves = []
-
         self.max_score = max_score
 
     def train(self, n_games=100, n_iters_per_game=10, T=0, batch_size=100):
@@ -84,25 +88,33 @@ class HeartsTrainer():
             print "Playing game {i} of {n_games}".format( i=i+1, n_games=n_games)
             print "**************************************************************************"
             self.play_game(T=T)
+            print "**************************************************************************"
+            for i in range(4):
+                print self.state.players[i], " got result: ", self.state.GetResult(i, result_type=self.result_type)
+            print "**************************************************************************"
+            print "Training net..."
             self.train_net( n_iters_per_game, batch_size=batch_size)
 
     def play_game(self, T=0):
         self.state = core.HeartsState(max_score=self.max_score)
         game_moves = []
-
+        node = AlphaZeroNode( state=self.state, net=self.net )
         while self.state.GetMoves() != []:
-            if self.state.round() == 0 and self.state.turn == -1:
-                node = UCT.Node(state=self.state, net=self.net)
+            node.RunSimulations( self.state, n_simulations=self.mcts_iter_max, c_puct=self.mcts_c_puct )
             print str(self.state)
-            m, node, moves, PI = UCT.PUCT(rootnode=node, rootstate=self.state, itermax=self.mcts_iter_max, verbose=False, T=T)  # play with values for itermax and verbose = True
-            node.parent = None  # Change it from being a child-node to a rootnode
+            edge, moves, PI = node.GetMCTSResult(T=T)
+            for e in node.edges:
+                print e
+            m, node = edge.action, edge.child
             print "Best Move: " + str(m) + "\n"
             game_moves.append( GameMoves( state=self.state.Clone(), moves=moves, pi=PI, value=None))
             logging.root.setLevel(logging.INFO)
             self.state.DoMove(m)
             logging.root.setLevel(logging.WARNING)
         for g in game_moves:
-            self.game_moves.append( GameMoves( state=g.state, moves=g.moves, pi=g.pi, value=self.state.GetResult(g.state.current_player())))
+            self.game_moves.append(
+                GameMoves( state=g.state, moves=g.moves, pi=g.pi,
+                           value=self.state.GetResult(g.state.current_player(),result_type=self.result_type)))
 
     def train_net(self, n_iterations, batch_size=8 ):
 
@@ -115,7 +127,6 @@ class HeartsTrainer():
                 action_probs = np.zeros((52,))
                 action_probs[ [c.index for c in m.moves] ] = m.pi
                 features = self.net.extract_state_feature( m.state )
-                m.state.current_player()
                 x_input.append(features)
                 y_action.append( action_probs )
                 y_value.append( m.value )
@@ -200,7 +211,7 @@ class AlphaZeroNode:
         action_score = Q + C_PUCT * P * U_num / (1 + N )
         return action_score
 
-    def RunSimulations(self, root_state, n_simulations=None, n_max_simulations=None):
+    def RunSimulations(self, root_state, n_simulations=None, n_max_simulations=None, c_puct=1.0):
         """Run branching simulations from this node starting as the root node."""
         assert self.actions == root_state.GetMoves()
         self.InitEdges()
@@ -214,9 +225,9 @@ class AlphaZeroNode:
             node = self
             while not node.is_leaf():
                 if node == self:
-                    e = node.PUCTSelectChild( dirichlet=0.9)   # Sample with noise.
+                    e = node.PUCTSelectChild( dirichlet=0.9, C_PUCT=c_puct)   # Sample with noise.
                 else:
-                    e = node.PUCTSelectChild()
+                    e = node.PUCTSelectChild( C_PUCT=c_puct)
                 edges_traversed.append( e )
                 state.DoMove(e.action)
                 if e.child is None:
@@ -252,7 +263,7 @@ class AlphaZeroNode:
             edge = self.edges[ix]
             PI = np.zeros( (len(self.edges)))
             PI[ix] = 1.0
-        return edge.child, self.actions, PI
+        return edge, self.actions, PI
 
 
 
