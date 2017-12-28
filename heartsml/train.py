@@ -10,10 +10,12 @@ GameMoves = collections.namedtuple( "GameMoves", [ "state", "pi", "moves", "valu
 
 class HeartsNet():
 
-    def __init__(self, result_type='points', value_activation='tanh', lr=0.2):
+    def __init__(self, result_type='points', value_activation='tanh', lr=0.2, loss_weights={'action': 1.0, 'value': 0.25} ):
         self.value_activation = value_activation
         self.result_type = result_type
         self.lr = lr
+        self.loss_weights = loss_weights
+        self.history = []
         self.model = self.build_net()
 
     def extract_state_feature(self, state):
@@ -59,11 +61,14 @@ class HeartsNet():
 
         m = keras.models.Model( [ input ], [ y_action, y_value ] )
         sgd = keras.optimizers.SGD(lr=self.lr, momentum=0.9)
-        m.compile( optimizer=sgd, loss={"action": "binary_crossentropy", "value": "mean_squared_error"} )
+        m.compile( optimizer=sgd, loss={"action": "binary_crossentropy", "value": "mean_squared_error"}, loss_weights=self.loss_weights )
         return m
 
     def train_on_batch(self, *args, **kwargs ):
-        return self.model.train_on_batch( *args, **kwargs )
+        losses = self.model.train_on_batch( *args, **kwargs )
+        results = dict(zip( self.model.metrics_names, losses ))
+        self.history.append( results )
+        return results
 
     def predict(self, state ):
         feature = self.extract_state_feature( state )
@@ -73,14 +78,15 @@ class HeartsNet():
 
 class HeartsTrainer():
     """Class to play a game of hearts using the PUCT algorithm while keeping track of state variables."""
-    def __init__(self, heartsnet, mcts_iter_max=100, max_score=50, mcts_c_puct=1.0):
+    def __init__(self, heartsnet, mcts_iter_max=100, max_score=50, mcts_c_puct=1.0, max_games_history=100 ):
         self.state = None
         self.net = heartsnet
         self.result_type = heartsnet.result_type
         self.mcts_iter_max=mcts_iter_max
         self.mcts_c_puct=mcts_c_puct
-        self.game_moves = []
+        self.games = []
         self.max_score = max_score
+        self.max_games_history = max_games_history
 
     def train(self, n_games=100, n_iters_per_game=10, T=0, batch_size=100):
         for i in range(n_games):
@@ -100,7 +106,7 @@ class HeartsTrainer():
         game_moves = []
         node = AlphaZeroNode( state=self.state, net=self.net )
         while self.state.GetMoves() != []:
-            node.RunSimulations( self.state, n_simulations=self.mcts_iter_max, c_puct=self.mcts_c_puct )
+            node.RunSimulations( self.state, n_max_simulations=self.mcts_iter_max, c_puct=self.mcts_c_puct )
             print str(self.state)
             edge, moves, PI = node.GetMCTSResult(T=T)
             for e in node.edges:
@@ -111,10 +117,13 @@ class HeartsTrainer():
             logging.root.setLevel(logging.INFO)
             self.state.DoMove(m)
             logging.root.setLevel(logging.WARNING)
+        final_game_moves = []
         for g in game_moves:
-            self.game_moves.append(
+            final_game_moves.append(
                 GameMoves( state=g.state, moves=g.moves, pi=g.pi,
                            value=self.state.GetResult(g.state.current_player(),result_type=self.result_type)))
+        self.games.append(final_game_moves)
+        self.games = self.games
 
     def train_net(self, n_iterations, batch_size=8 ):
 
@@ -122,8 +131,9 @@ class HeartsTrainer():
             x_input = []
             y_action = []
             y_value = []
+            all_moves = reduce( list.__add__, self.games[-self.max_games_history:], [] )
             for i in range(batch_size):
-                m = random.choice( self.game_moves )
+                m = random.choice( all_moves )
                 action_probs = np.zeros((52,))
                 action_probs[ [c.index for c in m.moves] ] = m.pi
                 features = self.net.extract_state_feature( m.state )
@@ -133,7 +143,8 @@ class HeartsTrainer():
             inputs = { 'input' : np.array(x_input) }
             outputs = { 'action': np.array(y_action),
                         'value': np.array(y_value) }
-            self.net.train_on_batch( inputs, outputs )
+            training_metrics = self.net.train_on_batch( inputs, outputs )
+            print training_metrics
 
     def predict(self, state ):
         return self.net.predict( state )
@@ -180,14 +191,19 @@ class AlphaZeroNode:
         self.actions = self.state.GetMoves()
         self.edges = None
 
+    def __repr__(self):
+        return "Node: Value:{value} Actions: {actions} Edges:\n{edges}\nNode State:\n{state}".format(
+            value=self.value, edges=str.join('\n', self.edges) , actions=self.actions, state=self.state)
+
     def is_leaf(self):
-        return len(self.actions) == 0
+        return self.edges is None or len(self.actions) == 0
 
     def InitEdges(self):
         """Initialize all the actions from the current state."""
         if self.edges is None:
             self.edges = []
-            prior_total = sum( [self.probs[a.index] for a in self.actions] )
+            #prior_total = sum( [self.probs[a.index] for a in self.actions] )
+            prior_total = 1.0
             for a in self.actions:
                 self.edges.append( AlphaZeroEdge( action=a, prior=self.probs[a.index]/prior_total, parent=self, child=None ))
 
@@ -232,13 +248,13 @@ class AlphaZeroNode:
                 state.DoMove(e.action)
                 if e.child is None:
                     node = AlphaZeroNode( state=state, net=node.net )
-                    node.InitEdges()
                     e.child = node
                 else:
                     node = e.child
+
+            node.InitEdges()
             if e.child is None:
                 node = AlphaZeroNode( state=state, net=node.net )
-                node.InitEdges()
                 e.child = node
 
             # We've reached the end
