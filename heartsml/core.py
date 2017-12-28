@@ -372,11 +372,20 @@ class HeartsState():
     def GetResult(self, player_index, result_type='winner'):
         player_points = np.array( [ p.points for p in self.players] )
         if result_type == 'winner':
-            win_value = np.ones( player_points.shape )*-1
-            win_value[ player_points == player_points.min() ] = 1
+            winners = player_points == player_points.min()
+            n_winners = winners.sum()
+            win_value = np.ones( player_points.shape )* -1.0 / ( 4 - n_winners )
+            win_value[ winners ] = 1.0 / n_winners
+            return win_value[player_index]
+        elif result_type == 'winloss':
+            winners = player_points == player_points.min()
+            losers = player_points == player_points.min()
+            win_value = np.zeros( player_points.shape )
+            win_value[ winners ] = 1.0 / winners.sum()
+            win_value[ losers ] = -1.0 / losers.sum()
             return win_value[player_index]
         elif result_type == 'points':
-            return ((self.max_score - player_points) / 25.0)[player_index],
+            return ((self.max_score - player_points) / 26.0)[player_index],
         else:
             raise ValueError("Unknown ")
 
