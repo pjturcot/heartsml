@@ -379,15 +379,23 @@ class HeartsState():
             return win_value[player_index]
         elif result_type == 'winloss':
             winners = player_points == player_points.min()
-            losers = player_points == player_points.min()
+            losers = player_points == player_points.max()
             win_value = np.zeros( player_points.shape )
             win_value[ winners ] = 1.0 / winners.sum()
             win_value[ losers ] = -1.0 / losers.sum()
             return win_value[player_index]
+        elif result_type == 'all_winloss':
+            winners = player_points == player_points.min()
+            losers = player_points == player_points.max()
+            win_value = np.zeros( player_points.shape )
+            win_value[ winners ] = 1.0 / winners.sum()
+            win_value[ losers ] = -1.0 / losers.sum()
+            player_order = (np.arange(4) + player_index) % 4
+            return win_value[ player_order ]
         elif result_type == 'points':
             return ((self.max_score - player_points) / 26.0)[player_index],
         else:
-            raise ValueError("Unknown ")
+            raise ValueError("Unknown result type: {result_type}".format(result_type=result_type) )
 
 
     def __repr__(self):

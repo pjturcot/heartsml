@@ -30,6 +30,9 @@ class HeartsNet():
         """Build the neural network."""
         s = core.HeartsState()
         feature = self.extract_state_feature( s )
+        value_n_outputs = 1
+        if self.result_type == 'all_winloss':
+            value_n_outputs = 4
 
         input = keras.layers.Input( feature.shape , name="input" )
         x = keras.layers.Conv1D(32, 1, kernel_regularizer=regularizer, name='shared_conv1')(input)
@@ -54,9 +57,9 @@ class HeartsNet():
         y_value = keras.layers.Activation('relu')(y_value)
         y_value = keras.layers.Flatten()(y_value)
         if self.value_activation is None:
-            y_value = keras.layers.Dense(1, kernel_regularizer=regularizer, name='value')(y_value)
+            y_value = keras.layers.Dense(value_n_outputs, kernel_regularizer=regularizer, name='value')(y_value)
         else:
-            y_value = keras.layers.Dense(1, kernel_regularizer=regularizer, name='value_dense6')(y_value)
+            y_value = keras.layers.Dense(value_n_outputs, kernel_regularizer=regularizer, name='value_dense6')(y_value)
             y_value = keras.layers.Activation(self.value_activation, name="value")(y_value)
 
         m = keras.models.Model( [ input ], [ y_action, y_value ] )
@@ -186,6 +189,9 @@ class AlphaZeroNode:
         self.net = net
         self.probs, self.value = self.net.predict( state )
         self.probs = self.probs.flatten()
+        if self.net.result_type == 'all_winloss':
+            previous_player = (self.state.playerJustMoved - self.state.current_player()) % 4
+            self.value = self.value[0][previous_player]   # Expected value of the previous player
         self.value = float(self.value)
 
         self.actions = self.state.GetMoves()
