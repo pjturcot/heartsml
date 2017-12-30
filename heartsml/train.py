@@ -8,7 +8,7 @@ import random
 
 GameMoves = collections.namedtuple( "GameMoves", [ "state", "pi", "moves", "value"])
 
-class HeartsNet():
+class HeartsNet(object):
 
     def __init__(self, result_type='points', value_activation='tanh', lr=0.2, loss_weights={'action': 1.0, 'value': 0.25} ):
         self.value_activation = value_activation
@@ -78,6 +78,61 @@ class HeartsNet():
         outputs = self.model.predict( {'input': np.array([feature]) } )
         return (outputs[0], outputs[1])
 
+class HeartsNetResidualBlock(HeartsNet):
+
+    def __init__(self, n_residual_blocks=None, **kwargs ):
+        self.n_residual_blocks=n_residual_blocks
+        super( HeartsNetResidualBlock, self ).__init__( **kwargs )
+        assert n_residual_blocks > 0
+
+
+    def add_residual_block(self, input_layer, n_filters, regularizer, name ):
+        x = keras.layers.Conv1D( n_filters, 1, kernel_regularizer=regularizer, name=name+"_convA_" )(input_layer)
+        x = keras.layers.BatchNormalization()(x)
+        x = keras.layers.Activation('relu')(x)
+        x = keras.layers.Conv1D( n_filters, 1, kernel_regularizer=regularizer, name=name+"_convB_" )(x)
+        x = keras.layers.BatchNormalization()(x)
+        x = keras.layers.add( [ x, input_layer ] )
+        x = keras.layers.Activation('relu')(x)
+        return x
+
+    def build_net(self, regularizer=keras.regularizers.l2(1e-4)):
+        """Build the neural network."""
+        s = core.HeartsState()
+        feature = self.extract_state_feature( s )
+        value_n_outputs = 1
+        if self.result_type == 'all_winloss':
+            value_n_outputs = 4
+
+        input = keras.layers.Input( feature.shape , name="input" )
+        x = keras.layers.Conv1D(128, 1, kernel_regularizer=regularizer, name='shared_conv1')(input)
+        x = keras.layers.BatchNormalization()(x)
+        x = keras.layers.Activation('relu')(x)
+        for i in range(1, self.n_residual_blocks+1):
+            x = self.add_residual_block( x, 128, regularizer, "resblock{i}".format(i=i))
+        y_action = keras.layers.Conv1D(2, 1, kernel_regularizer=regularizer, name='action_conv4')(x)
+        y_action = keras.layers.BatchNormalization()(y_action)
+        y_action = keras.layers.Activation('relu')(y_action)
+        y_action = keras.layers.Flatten()(y_action)
+        y_action = keras.layers.Dense(52, kernel_regularizer=regularizer, name='action_dense5')(y_action)
+        y_action = keras.layers.Activation('softmax', name="action")(y_action)
+        y_value = keras.layers.Conv1D(4, 1, kernel_regularizer=regularizer, name='value_conv4')(x)
+        y_value = keras.layers.BatchNormalization()(y_value)
+        y_value = keras.layers.Activation('relu')(y_value)
+        y_value = keras.layers.Dense(128, kernel_regularizer=regularizer, name='value_dense5')(y_value)
+        y_value = keras.layers.Activation('relu')(y_value)
+        y_value = keras.layers.Flatten()(y_value)
+        if self.value_activation is None:
+            y_value = keras.layers.Dense(value_n_outputs, kernel_regularizer=regularizer, name='value')(y_value)
+        else:
+            y_value = keras.layers.Dense(value_n_outputs, kernel_regularizer=regularizer, name='value_dense6')(y_value)
+            y_value = keras.layers.Activation(self.value_activation, name="value")(y_value)
+
+        m = keras.models.Model( [ input ], [ y_action, y_value ] )
+        sgd = keras.optimizers.SGD(lr=self.lr, momentum=0.9)
+        m.compile( optimizer=sgd, loss={"action": "binary_crossentropy", "value": "mean_squared_error"}, loss_weights=self.loss_weights )
+        return m
+
 
 class HeartsTrainer():
     """Class to play a game of hearts using the PUCT algorithm while keeping track of state variables."""
@@ -90,6 +145,7 @@ class HeartsTrainer():
         self.games = []
         self.max_score = max_score
         self.max_games_history = max_games_history
+        self.training_metrics = []
 
     def train(self, n_games=100, n_iters_per_game=10, T=0, batch_size=100):
         for i in range(n_games):
@@ -147,6 +203,7 @@ class HeartsTrainer():
             outputs = { 'action': np.array(y_action),
                         'value': np.array(y_value) }
             training_metrics = self.net.train_on_batch( inputs, outputs )
+            self.training_metrics.append( training_metrics )
             print training_metrics
 
     def predict(self, state ):
