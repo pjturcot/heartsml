@@ -243,13 +243,13 @@ class AlphaZeroNode:
 
     def __init__(self, state=None, net=None):
         self.state = state
+        self.player = self.state.current_player()
         self.net = net
         self.probs, self.value = self.net.predict( state )
         self.probs = self.probs.flatten()
         if self.net.result_type == 'all_winloss':
-            previous_player = (self.state.playerJustMoved - self.state.current_player()) % 4
-            self.value = self.value[0][previous_player]   # Expected value of the previous player
-        self.value = float(self.value)
+            reverse_index = (np.arange(4) - self.state.current_player()) % 4
+            self.value = self.value[0][ reverse_index ]   # Probabilities arranged by player-index
 
         self.actions = self.state.GetMoves()
         self.edges = None
@@ -261,7 +261,7 @@ class AlphaZeroNode:
     def is_leaf(self):
         return self.edges is None or len(self.actions) == 0
 
-    def InitEdges(self):
+    def InitEdges(self, result_type):
         """Initialize all the actions from the current state."""
         if self.edges is None:
             self.edges = []
@@ -269,6 +269,10 @@ class AlphaZeroNode:
             prior_total = 1.0
             for a in self.actions:
                 self.edges.append( AlphaZeroEdge( action=a, prior=self.probs[a.index]/prior_total, parent=self, child=None ))
+                if result_type == 'all_winloss':
+                    for e in self.edges:
+                        e.mean_action_value = np.zeros((4,), dtype='float')
+                        e.total_action_value = np.zeros((4,), dtype='float')
 
 
     def PUCTSelectChild(self, C_PUCT=26.0, dirichlet=None):
@@ -283,7 +287,10 @@ class AlphaZeroNode:
     def get_action_scores(self, C_PUCT=26.0, dirichlet=None ):
         N = np.array( [ e.visits for e in self.edges ] )
         U_num = np.sqrt(N.sum())
-        Q = np.array([ e.mean_action_value for e in self.edges ])
+        if self.net.result_type == 'all_winloss':
+            Q = np.array([ e.mean_action_value[self.player] for e in self.edges ])
+        else:
+            Q = np.array([ e.mean_action_value for e in self.edges ])
         P = np.array([ e.prior for e in self.edges ] )
         if dirichlet is not None:
             P += np.random.dirichlet( [dirichlet]*52 , 1 )[0, :P.size]
@@ -293,7 +300,7 @@ class AlphaZeroNode:
     def RunSimulations(self, root_state, n_simulations=None, n_max_simulations=None, c_puct=1.0):
         """Run branching simulations from this node starting as the root node."""
         assert self.actions == root_state.GetMoves()
-        self.InitEdges()
+        self.InitEdges(self.net.result_type)
         n_current_simulations = sum( [ e.visits for e in self.edges ] )
         if n_max_simulations and n_simulations is None:
             n_simulations = n_max_simulations - n_current_simulations
@@ -315,7 +322,7 @@ class AlphaZeroNode:
                 else:
                     node = e.child
 
-            node.InitEdges()
+            node.InitEdges(self.net.result_type)
             if e.child is None:
                 node = AlphaZeroNode( state=state, net=node.net )
                 e.child = node
@@ -333,7 +340,7 @@ class AlphaZeroNode:
 
     def GetMCTSResult(self, T=0.0):
         if T > 0:
-            N_a = np.array([e.visits for e in self.edges], dtype='float') ** (1 / T)
+            N_a = np.array([e.visits for e in self.edges], dtype='float') ** (1.0 / T)
             PI = N_a / np.sum(N_a)
             edge = np.random.choice( self.edges , p=PI )
         elif T == 0:
