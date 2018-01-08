@@ -10,9 +10,13 @@ GameMoves = collections.namedtuple( "GameMoves", [ "state", "pi", "moves", "valu
 
 class HeartsNet(object):
 
-    def __init__(self, result_type='points', value_activation='tanh', lr=0.2, loss_weights={'action': 1.0, 'value': 0.25} ):
-        self.value_activation = value_activation
+    def __init__(self, result_type='points', lr=0.2, loss_weights=None ):
         self.result_type = result_type
+        if loss_weights is None:
+            if 'rawpoints' in self.result_type:
+                loss_weights = {'action': 1.0, 'value': 0.05}
+            else:
+                loss_weights = {'action': 1.0, 'value': 0.25}
         self.lr = lr
         self.loss_weights = loss_weights
         self.history = []
@@ -31,8 +35,11 @@ class HeartsNet(object):
         s = core.HeartsState()
         feature = self.extract_state_feature( s )
         value_n_outputs = 1
-        if self.result_type == 'all_winloss':
+        value_activation = 'tanh'
+        if self.result_type.startswith('all_'):
             value_n_outputs = 4
+        if 'rawpoints' in self.result_type:
+            value_activation = None
 
         input = keras.layers.Input( feature.shape , name="input" )
         x = keras.layers.Conv1D(32, 1, kernel_regularizer=regularizer, name='shared_conv1')(input)
@@ -56,11 +63,11 @@ class HeartsNet(object):
         y_value = keras.layers.Dense(128, kernel_regularizer=regularizer, name='value_dense5')(y_value)
         y_value = keras.layers.Activation('relu')(y_value)
         y_value = keras.layers.Flatten()(y_value)
-        if self.value_activation is None:
+        if value_activation is None:
             y_value = keras.layers.Dense(value_n_outputs, kernel_regularizer=regularizer, name='value')(y_value)
         else:
             y_value = keras.layers.Dense(value_n_outputs, kernel_regularizer=regularizer, name='value_dense6')(y_value)
-            y_value = keras.layers.Activation(self.value_activation, name="value")(y_value)
+            y_value = keras.layers.Activation(value_activation, name="value")(y_value)
 
         m = keras.models.Model( [ input ], [ y_action, y_value ] )
         sgd = keras.optimizers.SGD(lr=self.lr, momentum=0.9)
@@ -101,8 +108,11 @@ class HeartsNetResidualBlock(HeartsNet):
         s = core.HeartsState()
         feature = self.extract_state_feature( s )
         value_n_outputs = 1
-        if self.result_type == 'all_winloss':
+        value_activation = 'tanh'
+        if self.result_type.startswith('all_'):
             value_n_outputs = 4
+        if 'rawpoints' in self.result_type:
+            value_activation = None
 
         input = keras.layers.Input( feature.shape , name="input" )
         x = keras.layers.Conv1D(128, 1, kernel_regularizer=regularizer, name='shared_conv1')(input)
@@ -122,11 +132,11 @@ class HeartsNetResidualBlock(HeartsNet):
         y_value = keras.layers.Dense(128, kernel_regularizer=regularizer, name='value_dense5')(y_value)
         y_value = keras.layers.Activation('relu')(y_value)
         y_value = keras.layers.Flatten()(y_value)
-        if self.value_activation is None:
+        if value_activation is None:
             y_value = keras.layers.Dense(value_n_outputs, kernel_regularizer=regularizer, name='value')(y_value)
         else:
             y_value = keras.layers.Dense(value_n_outputs, kernel_regularizer=regularizer, name='value_dense6')(y_value)
-            y_value = keras.layers.Activation(self.value_activation, name="value")(y_value)
+            y_value = keras.layers.Activation(value_activation, name="value")(y_value)
 
         m = keras.models.Model( [ input ], [ y_action, y_value ] )
         sgd = keras.optimizers.SGD(lr=self.lr, momentum=0.9)
@@ -136,7 +146,7 @@ class HeartsNetResidualBlock(HeartsNet):
 
 class HeartsTrainer():
     """Class to play a game of hearts using the PUCT algorithm while keeping track of state variables."""
-    def __init__(self, heartsnet, mcts_iter_max=100, max_score=50, mcts_c_puct=1.0, max_games_history=100 ):
+    def __init__(self, heartsnet, mcts_iter_max=1000, max_score=50, mcts_c_puct=1.0, max_games_history=100 ):
         self.state = None
         self.net = heartsnet
         self.result_type = heartsnet.result_type
@@ -167,6 +177,7 @@ class HeartsTrainer():
         while self.state.GetMoves() != []:
             node.RunSimulations( self.state, n_max_simulations=self.mcts_iter_max, c_puct=self.mcts_c_puct )
             print str(self.state)
+            print "Estimated value (current node):", node.value
             edge, moves, PI = node.GetMCTSResult(T=T)
             for e in node.edges:
                 print e
@@ -247,7 +258,7 @@ class AlphaZeroNode:
         self.net = net
         self.probs, self.value = self.net.predict( state )
         self.probs = self.probs.flatten()
-        if self.net.result_type == 'all_winloss':
+        if self.net.result_type.startswith('all_'):
             reverse_index = (np.arange(4) - self.state.current_player()) % 4
             self.value = self.value[0][ reverse_index ]   # Probabilities arranged by player-index
 
@@ -269,7 +280,7 @@ class AlphaZeroNode:
             prior_total = 1.0
             for a in self.actions:
                 self.edges.append( AlphaZeroEdge( action=a, prior=self.probs[a.index]/prior_total, parent=self, child=None ))
-                if result_type == 'all_winloss':
+                if result_type.startswith('all_'):
                     for e in self.edges:
                         e.mean_action_value = np.zeros((4,), dtype='float')
                         e.total_action_value = np.zeros((4,), dtype='float')
@@ -287,7 +298,7 @@ class AlphaZeroNode:
     def get_action_scores(self, C_PUCT=26.0, dirichlet=None ):
         N = np.array( [ e.visits for e in self.edges ] )
         U_num = np.sqrt(N.sum())
-        if self.net.result_type == 'all_winloss':
+        if self.net.result_type.startswith('all_'):
             Q = np.array([ e.mean_action_value[self.player] for e in self.edges ])
         else:
             Q = np.array([ e.mean_action_value for e in self.edges ])

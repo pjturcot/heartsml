@@ -392,8 +392,13 @@ class HeartsState():
             win_value[ losers ] = -1.0 / losers.sum()
             player_order = (np.arange(4) + player_index) % 4
             return win_value[ player_order ]
-        elif result_type == 'points':
-            return ((self.max_score - player_points) / 26.0)[player_index],
+        elif result_type == 'all_rawpoints':
+            player_order = (np.arange(4) + player_index) % 4
+            result = np.ones( player_points.shape ) * player_points.mean() - player_points  # Center the player points so they are 0
+            return result[ player_order ]
+        elif result_type == 'rawpoints':
+            result = np.ones( player_points.shape ) * player_points.mean() - player_points  # Center the player points so they are 0
+            return result[player_index]
         else:
             raise ValueError("Unknown result type: {result_type}".format(result_type=result_type) )
 
