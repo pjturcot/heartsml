@@ -406,3 +406,47 @@ class HeartsState():
     def __repr__(self):
         return "[Round {round}].\n{trick}\n{player}".format(
             round=self.round(), trick=self.trick, player=self.players[self.current_player()])
+
+    def display(self, display_players=set([0])):
+        kwargs = {}
+        for i in range(4):
+            player_id = (self.leading_player + i) % 4
+            if i < len( self.trick ):
+                kwargs['player_{id}'.format( id=player_id) ] = self.trick[i]
+            else:
+                kwargs['player_{id}'.format( id=player_id) ] = "??" if player_id == self.current_player() else "__"
+        trick_lines = """
+ |        [ {player_2:2} ]       |
+ |                     |
+ |   [ {player_1:2} ]   [ {player_3:2} ]   |
+ |                     |
+ |        [ {player_0:2} ]       |""".format( **kwargs ).split('\n')
+
+        PLAYER_TEMPLATE = """
+  Player {id}
+  Hand:
+  {hand}
+  Cards Won:
+  {cards_won}
+"""
+        player_lines = {}
+        for player_id, player in enumerate(self.players):
+            if player_id in display_players:
+                hand = str( player.hand )
+                cards_won = str( player.cards_won )
+            else:
+                hand = "?? ({n} cards)".format(n=len(player.hand))
+                cards_won = "?? ({n} cards)".format(n=len(player.cards_won))
+            player_lines[player_id] = PLAYER_TEMPLATE.format( id=player_id, hand=hand, cards_won=cards_won ).split('\n')
+
+        player_1_width = max( map(len, player_lines[1]))
+        trick_width = max( map(len, trick_lines))
+
+        # Display Player 2
+        for l in player_lines[2]:
+            print " "*player_1_width + l
+        # Display Player 1 , trick and Player 3
+        for p1, trick, p3 in zip( player_lines[1], trick_lines, player_lines[3]):
+            print p1 + " "*(player_1_width - len(p1)) + trick + " "*(trick_width-len(trick)) + p3
+        for l in player_lines[0]:
+            print " "*player_1_width + l
